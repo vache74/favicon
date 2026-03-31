@@ -1,0 +1,13 @@
+git:latest
+gitea:latest
+workflow-aggregator:latest
+ansible:latest
+ssh-agent:latest
+credentials-binding:latest
+oic-auth:latest
+mailer:latest
+email-ext:latest
+schedule-build:latest
+pipeline-graph-view:latest
+build-monitor-plugin:latest
+dark-theme:latest

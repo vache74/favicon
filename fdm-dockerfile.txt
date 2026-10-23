@@ -1,0 +1,43 @@
+FROM rockylinux/rockylinux:9-ubi-init
+
+ENV container=docker
+
+ARG FDM_VERSION=1.0.0
+ARG FDM_RPM=flowmon-device-manager-${FDM_VERSION}.el9.x86_64.rpm
+ARG FDM_URL=https://raw.githubusercontent.com/progress/flowmon-manager/main
+
+# Systemd příprava podle Rocky Docker Hub ukázky,
+# ale bezpečně ukončí build, pokud by systemd chyběl.
+RUN cd /lib/systemd/system/sysinit.target.wants/ && \
+    for i in *; do \
+        [ "$i" = "systemd-tmpfiles-setup.service" ] || rm -f "$i"; \
+    done && \
+    rm -f /lib/systemd/system/multi-user.target.wants/* && \
+    rm -f /etc/systemd/system/*.wants/* && \
+    rm -f /lib/systemd/system/local-fs.target.wants/* && \
+    rm -f /lib/systemd/system/sockets.target.wants/*udev* && \
+    rm -f /lib/systemd/system/sockets.target.wants/*initctl* && \
+    rm -f /lib/systemd/system/basic.target.wants/* && \
+    rm -f /lib/systemd/system/anaconda.target.wants/*
+
+RUN dnf -y update && \
+    dnf -y install curl-minimal && \
+    curl --fail --location --show-error \
+         --output "/tmp/${FDM_RPM}" \
+         "${FDM_URL}/${FDM_RPM}" && \
+    curl --fail --location --show-error \
+         --output "/tmp/${FDM_RPM}.sha256" \
+         "${FDM_URL}/${FDM_RPM}.sha256" && \
+    cd /tmp && \
+    sha256sum --check "${FDM_RPM}.sha256" && \
+    dnf -y install "./${FDM_RPM}" && \
+    systemctl enable fdm.service nginx.service && \
+    rm -f "/tmp/${FDM_RPM}" "/tmp/${FDM_RPM}.sha256" && \
+    dnf clean all && \
+    rm -rf /var/cache/dnf
+
+EXPOSE 443
+
+VOLUME ["/sys/fs/cgroup"]
+
+CMD ["/usr/sbin/init"]

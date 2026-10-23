@@ -1,1 +1,0 @@
-curl -sf "https://api.github.com/repos/klpod221/kerminal/releases/latest" | jq -r '.assets[].browser_download_url' | wget -q --show-progress -P ./kerminal -i -

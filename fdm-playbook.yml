@@ -1,0 +1,100 @@
+---
+- name: Build Flowmon Device Manager image locally with Podman
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    # Lokální build context; klidně změňte.
+    build_context: "{{ playbook_dir }}/build/fdm"
+
+    # Název a tag výsledné lokální image.
+    image_name: "localhost/flowmon-device-manager"
+    image_tag: "1.0.0"
+
+    # Base image se systemd/init.
+    rocky_base_image: "rockylinux/rockylinux:9-ubi-init"
+
+    # Zdroj RPM. Doporučené je nepoužívat dlouhodobě "main",
+    # ale Git commit SHA nebo tag.
+    fdm_git_ref: "main"
+    fdm_rpm_name: "flowmon-device-manager-1.0.0.el9.x86_64.rpm"
+    fdm_download_url: >-
+      https://raw.githubusercontent.com/progress/flowmon-manager/{{ fdm_git_ref }}
+
+  tasks:
+    - name: Create local build context directory
+      ansible.builtin.file:
+        path: "{{ build_context }}"
+        state: directory
+        mode: "0755"
+
+    - name: Create Containerfile
+      ansible.builtin.copy:
+        dest: "{{ build_context }}/Containerfile"
+        mode: "0644"
+        content: |
+          FROM {{ rocky_base_image }}
+
+          ENV container=docker
+
+          ARG FDM_RPM={{ fdm_rpm_name }}
+          ARG FDM_URL={{ fdm_download_url }}
+
+          # Příprava systemd kontejneru.
+          RUN cd /lib/systemd/system/sysinit.target.wants/ && \
+              for i in *; do \
+                  [ "$i" = "systemd-tmpfiles-setup.service" ] || rm -f "$i"; \
+              done && \
+              rm -f /lib/systemd/system/multi-user.target.wants/* && \
+              rm -f /etc/systemd/system/*.wants/* && \
+              rm -f /lib/systemd/system/local-fs.target.wants/* && \
+              rm -f /lib/systemd/system/sockets.target.wants/*udev* && \
+              rm -f /lib/systemd/system/sockets.target.wants/*initctl* && \
+              rm -f /lib/systemd/system/basic.target.wants/* && \
+              rm -f /lib/systemd/system/anaconda.target.wants/*
+
+          # Stažení RPM a checksum, ověření a instalace.
+          RUN dnf -y update && \
+              dnf -y install curl-minimal && \
+              curl --fail --location --show-error \
+                   --retry 3 \
+                   --output "/tmp/${FDM_RPM}" \
+                   "${FDM_URL}/${FDM_RPM}" && \
+              curl --fail --location --show-error \
+                   --retry 3 \
+                   --output "/tmp/${FDM_RPM}.sha256" \
+                   "${FDM_URL}/${FDM_RPM}.sha256" && \
+              cd /tmp && \
+              sha256sum --check "${FDM_RPM}.sha256" && \
+              dnf -y install "./${FDM_RPM}" && \
+              systemctl enable fdm.service && \
+              systemctl enable nginx.service && \
+              rm -f "/tmp/${FDM_RPM}" "/tmp/${FDM_RPM}.sha256" && \
+              dnf clean all && \
+              rm -rf /var/cache/dnf
+
+          EXPOSE 443
+
+          VOLUME ["/sys/fs/cgroup"]
+
+          CMD ["/usr/sbin/init"]
+
+    - name: Build Flowmon Device Manager image
+      containers.podman.podman_image:
+        name: "{{ image_name }}"
+        tag: "{{ image_tag }}"
+        path: "{{ build_context }}"
+        state: build
+        pull: true
+        force: true
+        build:
+          file: "{{ build_context }}/Containerfile"
+          format: oci
+          force_rm: true
+          rm: true
+      register: image_build
+
+    - name: Show built image information
+      ansible.builtin.debug:
+        var: image_build.image
